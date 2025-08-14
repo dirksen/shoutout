@@ -1,0 +1,23 @@
+Not quite — they’re **different permissions** in Discord:
+
+| Permission                                          | Meaning                                                                                     | Notes                                                                                                                                                        |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **View Channels** (aka “Read Messages” in older UI) | Allows the user or bot to **see the channel at all**. Without it, the channel is invisible. | Required for the bot to access any messages or interact in the channel.                                                                                      |
+| **Read Message History**                            | Allows reading **past messages** in a channel (scrollback).                                 | Useful if your bot wants to fetch older messages, e.g., for search or tallying awards. Does **not** let it see the channel if it doesn’t have View Channels. |
+
+**Key points for bots:**
+
+* To see messages at all, your bot must have **View Channels**.
+* To fetch older messages (`channel.messages.fetch()`), it needs **Read Message History**.
+* `Send Messages` is separate — needed to reply or post.
+
+> TL;DR: “Read Messages” = see the channel, “Read Message History” = fetch old messages.
+
+For your `/shoutout` bot:
+
+* **View Channels** → required
+* **Read Message History** → optional (only if you want to scan past messages)
+* **Send Messages** → required to reply
+* **Manage Channels** → required to update topic
+
+I can make a **complete permissions checklist** for your bot so you know exactly what to select in the Developer Portal. Do you want me to do that?

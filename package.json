@@ -2,13 +2,16 @@
   "name": "shotout-bot",
   "type": "module",
   "version": "1.0.0",
-  "main": "bot.mjs",
+  "main": "bot.js",
   "scripts": {
-    "start": "node bot.mjs",
-    "deploy": "node deploy-commands.mjs"
+    "start": "node bot.js",
+    "test": "node test.js"
   },
   "dependencies": {
     "discord.js": "^14.13.0",
     "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
   }
 }
