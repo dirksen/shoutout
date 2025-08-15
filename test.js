@@ -1,56 +1,130 @@
-// test.js
+// test.mjs (ESM)
 import assert from 'assert';
-import { queue, enqueue, parseAwards, serializeAwards, updateAwards } from './awards.js';
-import { handleRedeemCommand, handleShoutoutCommand } from './bot.js';
+import { whenIdle, enqueue, updateAwards, parseAwards } from './awards.js';
+import { handleShoutout, handleRedeem } from './bot.js'; // assumes you export these
 
-function makeMockChannel(initialTopic) {
-  let topic = initialTopic || '';
+function mockChannel(initial = '') {
+  let topic = initial;
   return {
-    get topic() {
-      return topic;
+    get topic() { return topic; },
+    async setTopic(t) { topic = t; return this; }
+  };
+}
+
+function mockShoutout({ authorId = '111', to_whom, award_count, reason, channel }) {
+  const replies = [];
+  return {
+    isChatInputCommand: () => true,
+    commandName: 'shoutout',
+    user: { id: authorId, toString: () => `<@${authorId}>` },
+    options: {
+      getUser: (name) => (name === 'to_whom' ? { id: to_whom, toString: () => `<@${to_whom}>` } : null),
+      getInteger: (name) => (name === 'award_count' ? award_count : null),
+      getString: (name) => (name === 'for' ? reason : null),
     },
-    async setTopic(newTopic) {
-      topic = newTopic;
-      return topic; // mimic Discord.js API (returns updated channel)
-    }
+    channel,
+    reply: async (payload) => { replies.push(payload); },
+    getReplies: () => replies
+  };
+}
+
+function mockRedeem({ authorId = '111', for_whom, amount, channel }) {
+  const replies = [];
+  return {
+    isChatInputCommand: () => true,
+    commandName: 'redeem',
+    user: { id: authorId, toString: () => `<@${authorId}>` },
+    options: {
+      getUser: (name) => (name === 'for_whom' ? { id: for_whom, toString: () => `<@${for_whom}>` } : null),
+      getInteger: (name) => (name === 'amount' ? amount : null),
+    },
+    channel,
+    reply: async (payload) => { replies.push(payload); },
+    getReplies: () => replies
   };
 }
 
 (async () => {
-  // Test adding awards
-  const channel = makeMockChannel('');
-  const mockInteraction = {
-    options: {
-      getUser: name => ({ toString: () => "@user3" }),
-      getInteger: name => 2,
-      getString: name => "for being awesome"
-    },
-    reply: msg => console.log("Bot reply:", msg),
-    channel,
-    user: { toString: () => "@user1" }
-  };
+  console.log('Running tests...');
 
-  await updateAwards(channel, '123', 5);
-  assert.strictEqual(channel.topic, '<@123>🏆x5');
+  // 1) /shoutout
+  {
+    const channel = mockChannel('');
+    const ix = mockShoutout({
+      to_whom: '222',
+      award_count: 3,
+      reason: 'great job',
+      channel
+    });
 
-  // Test incrementing awards
-  await updateAwards(channel, '123', 3);
-  assert.strictEqual(channel.topic, '<@123>🏆x8');
+    await handleShoutout(ix);
+    await whenIdle(); // <- wait for queued updateAwards
 
-  // Test negative check (should throw)
-  try {
-    await updateAwards(channel, '123', -10);
-    assert.fail('Expected NegativeAwardError to be thrown');
-  } catch (err) {
-    assert.strictEqual(err.message, 'NegativeAwardError');
+    const parsed = parseAwards(channel.topic);
+    assert.strictEqual(parsed.get('222'), 3, 'tally should be 3');
+    const reply = ix.getReplies()[0];
+    const content = typeof reply === 'string' ? reply : reply.content;
+    assert.match(content, /🏆🏆🏆/);
+    assert.match(content, /<@222>/);
   }
 
-  // Test awards for multiple users
-  await updateAwards(channel, '456', 2);
-  const parsed = await parseAwards(channel.topic);
-  assert.strictEqual(parsed['123'], 8);
-  assert.strictEqual(parsed['456'], 2);
-  assert.strictEqual(serializeAwards(parsed), '<@123>🏆x8\n<@456>🏆x2')
+  // 2) /redeem success
+  {
+    const channel = mockChannel('<@222>🏆x5');
+    const ix = mockRedeem({
+      for_whom: '222',
+      amount: 2,
+      channel
+    });
+
+    await handleRedeem(ix);
+    await whenIdle();
+
+    const parsed = parseAwards(channel.topic);
+    assert.strictEqual(parsed.get('222'), 3, 'tally should be 3 after redeem 2');
+    const reply = ix.getReplies()[0];
+    const content = typeof reply === 'string' ? reply : reply.content;
+    assert.match(content, /redeemed/);
+    assert.match(content, /🏆x2/);
+  }
+
+  // 3) /redeem negative failure
+  {
+    const channel = mockChannel('<@222>🏆x1');
+    const ix = mockRedeem({
+      for_whom: '222',
+      amount: 5,
+      channel
+    });
+
+    await handleRedeem(ix);
+    await whenIdle();
+
+    const reply = ix.getReplies()[0];
+    const content = typeof reply === 'string' ? reply : reply.content;
+    assert.match(content, /cannot redeem/i);
+    const parsed = parseAwards(channel.topic);
+    assert.strictEqual(parsed.get('222'), 1, 'tally should remain 1 on failure');
+  }
+
+  // 4) /redeem zero amount failure
+  {
+    const channel = mockChannel('<@222>🏆x1');
+    const ix = mockRedeem({
+      for_whom: '222',
+      amount: 0,
+      channel
+    });
+
+    await handleRedeem(ix);
+    await whenIdle();
+
+    const reply = ix.getReplies()[0];
+    const content = typeof reply === 'string' ? reply : reply.content;
+    assert.match(content, /cannot redeem/i);
+    const parsed = parseAwards(channel.topic);
+    assert.strictEqual(parsed.get('222'), 1, 'tally should remain 1 on failure');
+  }
 
   console.log('✅ All tests passed');
 })();
