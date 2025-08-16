@@ -1,58 +1,87 @@
-// awards.js
+// awards.js (ESM)
+export const _queue = [];
+let _processing = false;
+let _idleWaiters = [];
 
-// In-memory queue
-export const queue = [];
-let processing = false;
-
-export function enqueue(job) {
-  queue.push(job);
-  processQueue();
+// ---- Queue helpers ----
+export function enqueue(taskFn) {
+  // Returns a Promise that resolves/rejects when the job finishes
+  return new Promise((resolve, reject) => {
+    _queue.push(async () => {
+      try {
+        const r = await taskFn();
+        resolve(r);
+      } catch (e) {
+        reject(e);
+      }
+    });
+    processQueue();
+  });
 }
 
 export async function processQueue() {
-  if (processing) return;
-  processing = true;
+  if (_processing) return;
+  _processing = true;
 
-  while (queue.length > 0) {
-    const job = queue.shift();
-    try {
-      await job();
-    } catch (err) {
-      console.error('Job failed:', err);
-    }
+  while (_queue.length) {
+    const job = _queue.shift();
+    try { await job(); } catch (_) { /* already rejected in enqueue */ }
   }
 
-  processing = false;
+  _processing = false;
+  // wake any waiters
+  if (_idleWaiters.length) {
+    for (const wake of _idleWaiters) wake();
+    _idleWaiters = [];
+  }
 }
 
-// Parse awards from channel topic
-export function parseAwards(topic) {
-  const awards = {};
-  if (!topic) return awards;
-  topic.split('\n').forEach(line => {
+export function whenIdle() {
+  if (!_processing && _queue.length === 0) return Promise.resolve();
+  return new Promise(res => _idleWaiters.push(res));
+}
+
+// ---- Awards logic ----
+export function parseAwards(topic = '') {
+  const m = new Map();
+  if (!topic) return m;
+  for (const line of topic.split('\n')) {
     const match = line.match(/^<@!?(\d+)>🏆x(\d+)$/);
-    if (match) {
-      const [, userId, count] = match;
-      awards[userId] = parseInt(count, 10);
-    }
-  });
-  return awards;
+    if (match) m.set(match[1], parseInt(match[2], 10));
+  }
+  return m;
 }
 
-// Serialize awards to channel topic
-export function serializeAwards(awards) {
-  return Object.entries(awards)
-    .map(([userId, count]) => `<@${userId}>🏆x${count}`)
+export function serializeAwards(map) {
+  return Array.from(map.entries())
+    .map(([id, count]) => `<@${id}>🏆x${count}`)
     .join('\n');
 }
 
-// Update awards (mockable for tests)
 export async function updateAwards(channel, userId, delta) {
-  const awards = await parseAwards(channel.topic);
+  const awards = parseAwards(channel.topic);
+  if (delta < 0) {
+    console.log('Delta:', delta);
+  }
+  const next = (awards.get(userId) || 0) + delta;
+  if (next < 0) throw new Error('NegativeAwardError');
 
-  awards[userId] = (awards[userId] || 0) + delta;
-  if (awards[userId] <= 0)
-    throw new Error('NegativeAwardError');
+  if (next === 0) awards.delete(userId); else awards.set(userId, next);
+  const newTopic = serializeAwards(awards);
 
-  await channel.setTopic(await serializeAwards(awards));
+  if (typeof channel.setTopic === 'function') {
+    // wrap in a try-catch to handle potential errors
+    try {
+      await channel.setTopic(newTopic);
+      if (delta < 0) {
+        console.log('Done set topic:', newTopic);
+      }
+    } catch (err) {
+      console.error(`Failed to update topic for channel ${channel.id}:`, err);
+      throw err; // rethrow to let the caller handle it
+    }
+  } else {
+    channel.topic = newTopic; // test fallback
+  }
+  return newTopic;
 }

@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, PermissionsBitField, REST, Routes, SlashCommandBuilder } from 'discord.js';
+import { Client, GatewayIntentBits, PermissionFlagsBits, REST, Routes, SlashCommandBuilder } from 'discord.js';
 import dotenv from 'dotenv';
 import { enqueue, processQueue, parseAwards, serializeAwards, updateAwards } from './awards.js';
 
@@ -19,6 +19,7 @@ const commands = [
     .setDescription('Redeem awards from a user (Channel Manager only)')
     .addUserOption(opt => opt.setName('for_whom').setDescription('The person to redeem the awards').setRequired(true))
     .addIntegerOption(opt => opt.setName('amount').setDescription('Amount to deduct').setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
@@ -38,7 +39,7 @@ client.on('ready', () => {
 });
 
 // Handle shoutout command
-async function handleShoutoutCommand(interaction) {
+export async function handleShoutout(interaction) {
   const recipient = interaction.options.getUser('to_whom');
   const count = interaction.options.getInteger('award_count');
   const reason = interaction.options.getString('for');
@@ -49,33 +50,36 @@ async function handleShoutoutCommand(interaction) {
     return;
   }
 
-  enqueue(async () => {
+  await enqueue(async () => {
+    await interaction.deferReply();
     await updateAwards(channel, recipient.id, count);
-    await interaction.reply(`${interaction.user} gave ${Array(count).fill("🏆").join('')} to ${recipient} for: ${reason}`);
+    await interaction.editReply(`${interaction.user} gave ${Array(count).fill("🏆").join('')} to ${recipient} for: ${reason}`);
   });
 }
 
 // Handle redeem command
-async function handleRedeemCommand(interaction) {
-  if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
-    await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
-    return;
-  }
-
+export async function handleRedeem(interaction) {
   const recipient = interaction.options.getUser('for_whom');
   const amount = interaction.options.getInteger('amount');
   const channel = interaction.channel;
 
-  enqueue(async () => {
+  if (amount === 0) {
+    await interaction.reply({ content: 'Amount must be non-zero.', ephemeral: true });
+    return;
+  }
+
+  await enqueue(async () => {
     try {
+      await interaction.deferReply();
+      console.log(`Redeeming ${amount} awards from ${recipient.id} in channel ${channel.id}`);
       await updateAwards(channel, recipient.id, -amount);
-      await interaction.reply(`${interaction.user} redeemed ${amount}🏆 from ${recipient}`);
+      await interaction.editReply(`${interaction.user} redeemed 🏆x${amount} from ${recipient}`);
     } catch (err) {
       if (err.message === 'NegativeAwardError') {
-        await interaction.reply({ content: `❌ Cannot redeem more than ${recipient} currently has.`, ephemeral: true });
+        await interaction.editReply({ content: `❌ Cannot redeem more than ${recipient} currently has.`, ephemeral: true });
       } else {
         console.error(err);
-        await interaction.reply({ content: 'An error occurred.', ephemeral: true });
+        await interaction.editReply({ content: 'An error occurred.', ephemeral: true });
       }
     }
   });
@@ -87,10 +91,14 @@ client.on('interactionCreate', async interaction => {
   const { commandName } = interaction;
 
   if (commandName === 'shoutout') {
-    await handleShoutoutCommand(interaction);
+    await handleShoutout(interaction);
   } else if (commandName === 'redeem') {
-    await handleRedeemCommand(interaction);
+    await handleRedeem(interaction);
   }
+});
+
+client.rest.on('rateLimited', (info) => {
+  console.log('Rate limited:', info);
 });
 
 // Graceful shutdown

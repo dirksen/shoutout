@@ -1,7 +1,8 @@
-// test.mjs (ESM)
+// test.mjs
 import assert from 'assert';
-import { whenIdle, enqueue, updateAwards, parseAwards } from './awards.js';
-import { handleShoutout, handleRedeem } from './bot.js'; // assumes you export these
+import test from 'node:test';
+import { whenIdle, parseAwards } from './awards.js';
+import { handleShoutout, handleRedeem } from './bot.js';
 
 function mockChannel(initial = '') {
   let topic = initial;
@@ -44,11 +45,8 @@ function mockRedeem({ authorId = '111', for_whom, amount, channel }) {
   };
 }
 
-(async () => {
-  console.log('Running tests...');
-
-  // 1) /shoutout
-  {
+test.describe('/shoutout', () => {
+  test('should award points', async () => {
     const channel = mockChannel('');
     const ix = mockShoutout({
       to_whom: '222',
@@ -58,18 +56,38 @@ function mockRedeem({ authorId = '111', for_whom, amount, channel }) {
     });
 
     await handleShoutout(ix);
-    await whenIdle(); // <- wait for queued updateAwards
+    await whenIdle();
 
     const parsed = parseAwards(channel.topic);
-    assert.strictEqual(parsed.get('222'), 3, 'tally should be 3');
+    assert.strictEqual(parsed.get('222'), 3);
     const reply = ix.getReplies()[0];
     const content = typeof reply === 'string' ? reply : reply.content;
     assert.match(content, /🏆🏆🏆/);
     assert.match(content, /<@222>/);
-  }
+  });
+});
 
-  // 2) /redeem success
-  {
+test.describe('/shoutout', () => {
+  test('should not award oneself', async () => {
+    const channel = mockChannel('');
+    const ix = mockShoutout({
+      to_whom: '111',
+      award_count: 3,
+      reason: 'great job',
+      channel
+    });
+
+    await handleShoutout(ix);
+    await whenIdle();
+
+    const reply = ix.getReplies()[0];
+    const content = typeof reply === 'string' ? reply : reply.content;
+    assert.match(content, /cannot give awards to yourself/);
+  });
+});
+
+test.describe('/redeem', () => {
+  test('should redeem points successfully', async () => {
     const channel = mockChannel('<@222>🏆x5');
     const ix = mockRedeem({
       for_whom: '222',
@@ -81,15 +99,14 @@ function mockRedeem({ authorId = '111', for_whom, amount, channel }) {
     await whenIdle();
 
     const parsed = parseAwards(channel.topic);
-    assert.strictEqual(parsed.get('222'), 3, 'tally should be 3 after redeem 2');
+    assert.strictEqual(parsed.get('222'), 3);
     const reply = ix.getReplies()[0];
     const content = typeof reply === 'string' ? reply : reply.content;
     assert.match(content, /redeemed/);
     assert.match(content, /🏆x2/);
-  }
+  });
 
-  // 3) /redeem negative failure
-  {
+  test('should fail if redeeming more than available', async () => {
     const channel = mockChannel('<@222>🏆x1');
     const ix = mockRedeem({
       for_whom: '222',
@@ -100,15 +117,14 @@ function mockRedeem({ authorId = '111', for_whom, amount, channel }) {
     await handleRedeem(ix);
     await whenIdle();
 
+    const parsed = parseAwards(channel.topic);
+    assert.strictEqual(parsed.get('222'), 1);
     const reply = ix.getReplies()[0];
     const content = typeof reply === 'string' ? reply : reply.content;
     assert.match(content, /cannot redeem/i);
-    const parsed = parseAwards(channel.topic);
-    assert.strictEqual(parsed.get('222'), 1, 'tally should remain 1 on failure');
-  }
+  });
 
-  // 4) /redeem zero amount failure
-  {
+  test('should fail if redeem amount is zero', async () => {
     const channel = mockChannel('<@222>🏆x1');
     const ix = mockRedeem({
       for_whom: '222',
@@ -117,14 +133,8 @@ function mockRedeem({ authorId = '111', for_whom, amount, channel }) {
     });
 
     await handleRedeem(ix);
-    await whenIdle();
-
     const reply = ix.getReplies()[0];
     const content = typeof reply === 'string' ? reply : reply.content;
-    assert.match(content, /cannot redeem/i);
-    const parsed = parseAwards(channel.topic);
-    assert.strictEqual(parsed.get('222'), 1, 'tally should remain 1 on failure');
-  }
-
-  console.log('✅ All tests passed');
-})();
+    assert.match(content, /must be non-zero/);
+  });
+});
