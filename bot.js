@@ -1,3 +1,4 @@
+// bot.js (ESM)
 import { Client, GatewayIntentBits, PermissionFlagsBits, REST, Routes, SlashCommandBuilder } from 'discord.js';
 import dotenv from 'dotenv';
 import { enqueue, processQueue, parseAwards, serializeAwards, updateAwards } from './awards.js';
@@ -51,9 +52,8 @@ export async function handleShoutout(interaction) {
   }
 
   await enqueue(async () => {
-    await interaction.deferReply();
+    await interaction.reply(`${interaction.user} gave ${Array(count).fill("🏆").join('')} to ${recipient} for: ${reason}`);
     await updateAwards(channel, recipient.id, count);
-    await interaction.editReply(`${interaction.user} gave ${Array(count).fill("🏆").join('')} to ${recipient} for: ${reason}`);
   });
 }
 
@@ -71,7 +71,6 @@ export async function handleRedeem(interaction) {
   await enqueue(async () => {
     try {
       await interaction.deferReply();
-      console.log(`Redeeming ${amount} awards from ${recipient.id} in channel ${channel.id}`);
       await updateAwards(channel, recipient.id, -amount);
       await interaction.editReply(`${interaction.user} redeemed 🏆x${amount} from ${recipient}`);
     } catch (err) {

@@ -1,14 +1,44 @@
-// test.mjs
+// test.js
 import assert from 'assert';
 import test from 'node:test';
-import { whenIdle, parseAwards } from './awards.js';
+import { whenIdle, parseAwards, getOrCreateLeaderboardMessage } from './awards.js';
 import { handleShoutout, handleRedeem } from './bot.js';
 
-function mockChannel(initial = '') {
-  let topic = initial;
+async function mockChannel(leaderboard) {
+  let pinned = new Map();
+  let sentMessages = [];
+
+  const channel = {
+    messages: {
+      fetchPinned: async () => pinned.values(),
+    },
+    send: async (content) => {
+      const msg = makeMockMessage(content, pinned, sentMessages);
+      sentMessages.push(msg);
+      return msg;
+    },
+    _pinned: pinned,
+    _sent: sentMessages,
+  };
+
+  if (leaderboard) {
+    const msg = await channel.send('Leaderboard:\n' + leaderboard);
+    await msg.pin();
+  }
+  return channel;
+}
+
+function makeMockMessage(content, pinned, sentMessages) {
   return {
-    get topic() { return topic; },
-    async setTopic(t) { topic = t; return this; }
+    content,
+    async pin() {
+      pinned.set(this.id, this);
+    },
+    async edit(newContent) {
+      this.content = newContent;
+      return this;
+    },
+    id: String(Math.random()),
   };
 }
 
@@ -25,6 +55,8 @@ function mockShoutout({ authorId = '111', to_whom, award_count, reason, channel 
     },
     channel,
     reply: async (payload) => { replies.push(payload); },
+    editReply: async (payload) => { replies.push(payload); },
+    deferReply: async () => { /* no-op */ },
     getReplies: () => replies
   };
 }
@@ -41,13 +73,15 @@ function mockRedeem({ authorId = '111', for_whom, amount, channel }) {
     },
     channel,
     reply: async (payload) => { replies.push(payload); },
+    editReply: async (payload) => { replies.push(payload); },
+    deferReply: async () => { /* no-op */ },
     getReplies: () => replies
   };
 }
 
 test.describe('/shoutout', () => {
   test('should award points', async () => {
-    const channel = mockChannel('');
+    const channel = await mockChannel();
     const ix = mockShoutout({
       to_whom: '222',
       award_count: 3,
@@ -58,7 +92,8 @@ test.describe('/shoutout', () => {
     await handleShoutout(ix);
     await whenIdle();
 
-    const parsed = parseAwards(channel.topic);
+    const leaderboardMsg = await getOrCreateLeaderboardMessage(channel)
+    const parsed = parseAwards(leaderboardMsg.content);
     assert.strictEqual(parsed.get('222'), 3);
     const reply = ix.getReplies()[0];
     const content = typeof reply === 'string' ? reply : reply.content;
@@ -69,7 +104,7 @@ test.describe('/shoutout', () => {
 
 test.describe('/shoutout', () => {
   test('should not award oneself', async () => {
-    const channel = mockChannel('');
+    const channel = await mockChannel('');
     const ix = mockShoutout({
       to_whom: '111',
       award_count: 3,
@@ -88,7 +123,7 @@ test.describe('/shoutout', () => {
 
 test.describe('/redeem', () => {
   test('should redeem points successfully', async () => {
-    const channel = mockChannel('<@222>🏆x5');
+    const channel = await mockChannel('<@222>🏆x5');
     const ix = mockRedeem({
       for_whom: '222',
       amount: 2,
@@ -98,7 +133,8 @@ test.describe('/redeem', () => {
     await handleRedeem(ix);
     await whenIdle();
 
-    const parsed = parseAwards(channel.topic);
+    const leaderboardMsg = await getOrCreateLeaderboardMessage(channel)
+    const parsed = parseAwards(leaderboardMsg.content);
     assert.strictEqual(parsed.get('222'), 3);
     const reply = ix.getReplies()[0];
     const content = typeof reply === 'string' ? reply : reply.content;
@@ -107,7 +143,7 @@ test.describe('/redeem', () => {
   });
 
   test('should fail if redeeming more than available', async () => {
-    const channel = mockChannel('<@222>🏆x1');
+    const channel = await mockChannel('<@222>🏆x1');
     const ix = mockRedeem({
       for_whom: '222',
       amount: 5,
@@ -117,7 +153,8 @@ test.describe('/redeem', () => {
     await handleRedeem(ix);
     await whenIdle();
 
-    const parsed = parseAwards(channel.topic);
+    const leaderboardMsg = await getOrCreateLeaderboardMessage(channel)
+    const parsed = parseAwards(leaderboardMsg.content);
     assert.strictEqual(parsed.get('222'), 1);
     const reply = ix.getReplies()[0];
     const content = typeof reply === 'string' ? reply : reply.content;
@@ -125,7 +162,7 @@ test.describe('/redeem', () => {
   });
 
   test('should fail if redeem amount is zero', async () => {
-    const channel = mockChannel('<@222>🏆x1');
+    const channel = await mockChannel('<@222>🏆x1');
     const ix = mockRedeem({
       for_whom: '222',
       amount: 0,

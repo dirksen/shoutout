@@ -37,15 +37,19 @@ export async function processQueue() {
 }
 
 export function whenIdle() {
-  if (!_processing && _queue.length === 0) return Promise.resolve();
+  if (!_processing && _queue.length === 0) {
+    return Promise.resolve();
+  }
+  // if (!_processing && _queue.length === 0) return Promise.resolve();
   return new Promise(res => _idleWaiters.push(res));
 }
 
 // ---- Awards logic ----
-export function parseAwards(topic = '') {
+export function parseAwards(content='') {
   const m = new Map();
-  if (!topic) return m;
-  for (const line of topic.split('\n')) {
+  if (!content) return m;
+  const lines = content.trim().split("\n").slice(1); // skip "Leaderboard:"
+  for (const line of lines) {
     const match = line.match(/^<@!?(\d+)>🏆x(\d+)$/);
     if (match) m.set(match[1], parseInt(match[2], 10));
   }
@@ -53,35 +57,31 @@ export function parseAwards(topic = '') {
 }
 
 export function serializeAwards(map) {
-  return Array.from(map.entries())
+  const serialized = [...map.entries()]
     .map(([id, count]) => `<@${id}>🏆x${count}`)
     .join('\n');
+  return "Leaderboard:\n" + serialized
+}
+
+export async function getOrCreateLeaderboardMessage(channel) {
+  const pins = await channel.messages.fetchPinned();
+  let leaderboardMsg = pins.find(m => m.content.startsWith("Leaderboard:"));
+
+  if (!leaderboardMsg) {
+    leaderboardMsg = await channel.send("Leaderboard:");
+    await leaderboardMsg.pin();
+  }
+  return leaderboardMsg;
 }
 
 export async function updateAwards(channel, userId, delta) {
-  const awards = parseAwards(channel.topic);
-  if (delta < 0) {
-    console.log('Delta:', delta);
-  }
+  const leaderboardMsg = await getOrCreateLeaderboardMessage(channel);
+  const awards = parseAwards(leaderboardMsg.content);
   const next = (awards.get(userId) || 0) + delta;
   if (next < 0) throw new Error('NegativeAwardError');
 
   if (next === 0) awards.delete(userId); else awards.set(userId, next);
-  const newTopic = serializeAwards(awards);
-
-  if (typeof channel.setTopic === 'function') {
-    // wrap in a try-catch to handle potential errors
-    try {
-      await channel.setTopic(newTopic);
-      if (delta < 0) {
-        console.log('Done set topic:', newTopic);
-      }
-    } catch (err) {
-      console.error(`Failed to update topic for channel ${channel.id}:`, err);
-      throw err; // rethrow to let the caller handle it
-    }
-  } else {
-    channel.topic = newTopic; // test fallback
-  }
-  return newTopic;
+  const newContent = serializeAwards(awards);
+  await leaderboardMsg.edit(newContent);
+  return awards;
 }
