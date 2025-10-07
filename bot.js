@@ -1,5 +1,12 @@
 // bot.js (ESM)
-import { Client, GatewayIntentBits, PermissionFlagsBits, REST, Routes, SlashCommandBuilder } from "discord.js";
+import {
+  Client,
+  GatewayIntentBits,
+  PermissionFlagsBits,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+} from "discord.js";
 import dotenv from "dotenv";
 import { AwardManager } from "./awards.js";
 
@@ -17,22 +24,34 @@ const commands = [
     .setName("shoutout")
     .setDescription("Give an award to a user")
     .addUserOption((opt) =>
-      opt.setName("to_whom").setDescription("Who gets the award").setRequired(true)
+      opt
+        .setName("to_whom")
+        .setDescription("Who gets the award")
+        .setRequired(true),
     )
     .addStringOption((opt) =>
-      opt.setName("for").setDescription("For being/doing...").setRequired(true)
+      opt.setName("for").setDescription("For being/doing...").setRequired(true),
     )
     .addIntegerOption((opt) =>
-      opt.setName("award_count").setDescription("Number of awards").setRequired(true)
+      opt
+        .setName("award_count")
+        .setDescription("Number of awards")
+        .setRequired(true),
     ),
   new SlashCommandBuilder()
     .setName("redeem")
     .setDescription("Redeem awards from a user (Channel Manager only)")
     .addUserOption((opt) =>
-      opt.setName("for_whom").setDescription("The person to redeem from").setRequired(true)
+      opt
+        .setName("for_whom")
+        .setDescription("The person to redeem from")
+        .setRequired(true),
     )
     .addIntegerOption((opt) =>
-      opt.setName("amount").setDescription("Amount to deduct").setRequired(true)
+      opt
+        .setName("amount")
+        .setDescription("Amount to deduct")
+        .setRequired(true),
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 ].map((cmd) => cmd.toJSON());
@@ -53,6 +72,7 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
 client.on("ready", async () => {
   console.log(`🤖 Logged in as ${client.user.tag}`);
+  console.log("GUILD ID:", process.env.GUILD_ID);
   const guild = await client.guilds.fetch(process.env.GUILD_ID);
   awards = new AwardManager(guild);
 });
@@ -66,7 +86,7 @@ async function handleShoutout(interaction) {
   try {
     await awards.updateAwards(recipient.id, count, interaction.user.id);
     await interaction.reply(
-      `${interaction.user} gave ${"🏆".repeat(count)} to ${recipient} for: ${reason}`
+      `${interaction.user} gave ${"🏆".repeat(count)} to ${recipient} for: ${reason}`,
     );
   } catch (err) {
     await interaction.reply({ content: `⚠️ ${err.message}`, ephemeral: true });
@@ -79,16 +99,22 @@ async function handleRedeem(interaction) {
   const amount = interaction.options.getInteger("amount");
 
   if (recipient.id === interaction.user.id) {
-    throw new Error("You cannot award yourself.");
-  }
-
-  try {
-    await awards.updateAwards(recipient.id, -amount, interaction.user.id);
-    await interaction.reply(
-      `${interaction.user} redeemed 🏆x${amount} from ${recipient}`
-    );
-  } catch (err) {
-    await interaction.reply({ content: `⚠️ ${err.message}`, ephemeral: true });
+    await interaction.reply({
+      content: "You cannot award yourself.",
+      ephemeral: true,
+    });
+  } else {
+    try {
+      await awards.updateAwards(recipient.id, -amount, interaction.user.id);
+      await interaction.reply(
+        `${interaction.user} redeemed 🏆x${amount} from ${recipient}`,
+      );
+    } catch (err) {
+      await interaction.reply({
+        content: `⚠️ ${err.message}`,
+        ephemeral: true,
+      });
+    }
   }
 }
 
