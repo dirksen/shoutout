@@ -54,6 +54,9 @@ const commands = [
         .setRequired(true),
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder()
+    .setName("ping")
+    .setDescription("Check if the bot is responsive"),
 ].map((cmd) => cmd.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
@@ -118,6 +121,10 @@ async function handleRedeem(interaction) {
   }
 }
 
+async function handlePing(interaction) {
+  await interaction.reply({ content: "Pong!", ephemeral: true });
+}
+
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -125,6 +132,8 @@ client.on("interactionCreate", async (interaction) => {
     await handleShoutout(interaction);
   } else if (interaction.commandName === "redeem") {
     await handleRedeem(interaction);
+  } else if (interaction.commandName === "ping") {
+    await handlePing(interaction);
   }
 });
 
